@@ -41,6 +41,10 @@ export class UIManager {
     this.setupSlider('glow-hue', 'glow-hue-value', (value) => {
       callback({ hue: parseFloat(value) });
     });
+    
+    this.setupSlider('transparency', 'transparency-value', (value) => {
+      callback({ transparency: parseFloat(value) });
+    });
   }
   
   setupPulseControl(callback) {
@@ -80,6 +84,31 @@ export class UIManager {
         }
       });
     });
+  }
+  
+  setupTransparencyControls(forceTransparencyCallback, analyzeCallback) {
+    const forceButton = document.getElementById('force-transparency-button');
+    const analyzeButton = document.getElementById('analyze-button');
+    
+    if (forceButton) {
+      forceButton.addEventListener('click', () => {
+        const transparency = parseFloat(document.getElementById('transparency')?.value || 0.6);
+        forceTransparencyCallback(transparency);
+        this.showNotification(`Застосовано прозорість ${transparency}`, 'info');
+      });
+    }
+    
+    if (analyzeButton) {
+      analyzeButton.addEventListener('click', () => {
+        const analysis = analyzeCallback();
+        if (analysis) {
+          this.showNotification(
+            `Знайдено: ${analysis.transparent.length} прозорих, ${analysis.opaque.length} непрозорих матеріалів`, 
+            'info'
+          );
+        }
+      });
+    }
   }
   
   setupModelSelector(callback) {

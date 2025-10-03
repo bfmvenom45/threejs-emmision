@@ -194,6 +194,29 @@ body {
   transform: translateY(0);
 }
 
+.action-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(45deg, #4f9eff 0%, #667eea 100%);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 6px;
+}
+
+.action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(79, 158, 255, 0.4);
+}
+
+.action-btn:active {
+  transform: translateY(0);
+}
+
 /* Loading Indicator */
 .loading {
   position: fixed;

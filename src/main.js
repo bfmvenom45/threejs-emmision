@@ -83,7 +83,30 @@ class App {
     // Налаштування контролів glow
     this.uiManager.setupGlowControls((params) => {
       this.glowManager.updateParams(params);
+      
+      // Якщо змінюється прозорість, застосовуємо до поточної моделі
+      if (params.transparency && this.currentModel) {
+        this.glowManager.forceTransparency(this.currentModel, params.transparency);
+        // Перезастосовуємо glow після зміни прозорості
+        this.glowManager.addInnerGlow(this.currentModel);
+      }
     });
+    
+    // Налаштування контролів прозорості
+    this.uiManager.setupTransparencyControls(
+      (transparency) => {
+        if (this.currentModel) {
+          this.glowManager.forceTransparency(this.currentModel, transparency);
+          this.glowManager.addInnerGlow(this.currentModel);
+        }
+      },
+      () => {
+        if (this.currentModel) {
+          return this.glowManager.analyzeModelTransparency(this.currentModel);
+        }
+        return null;
+      }
+    );
     
     // Налаштування пульсації
     this.uiManager.setupPulseControl((enabled) => {
