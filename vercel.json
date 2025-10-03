@@ -5,7 +5,7 @@
   "framework": "vite",
   "headers": [
     {
-      "source": "/assets/.*\\.(js|css|woff2?|ttf|eot|ico|png|jpe?g|gif|svg)",
+      "source": "/assets/(.*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -14,7 +14,7 @@
       ]
     },
     {
-      "source": "/.*\\.(glb|gltf)",
+      "source": "/(.*).glb",
       "headers": [
         {
           "key": "Cache-Control", 
@@ -23,6 +23,19 @@
         {
           "key": "Content-Type",
           "value": "model/gltf-binary"
+        }
+      ]
+    },
+    {
+      "source": "/(.*).gltf",
+      "headers": [
+        {
+          "key": "Cache-Control", 
+          "value": "public, max-age=86400"
+        },
+        {
+          "key": "Content-Type",
+          "value": "model/gltf+json"
         }
       ]
     }
