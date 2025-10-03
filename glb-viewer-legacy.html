@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GLB Viewer з Bloom Effect (Legacy версія)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
+      color: white;
+    }
+    #app {
+      width: 100vw;
+      height: 100vh;
+    }
+    
+    .controls {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 15px;
+      border-radius: 8px;
+      min-width: 200px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .control-group {
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .control-group:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+    
+    .control-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #aaa;
+    }
+    
+    .control-group input[type="range"] {
+      width: 100%;
+      margin-bottom: 5px;
+    }
+    
+    .control-group input[type="radio"] {
+      margin-right: 5px;
+    }
+    
+    .control-group .radio-label {
+      display: inline;
+      margin-right: 15px;
+      font-size: 11px;
+    }
+    
+    button {
+      background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      padding: 8px 15px;
+      border-radius: 5px;
+      color: white;
+      cursor: pointer;
+      font-size: 12px;
+      margin-top: 10px;
+      width: 100%;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }
+    
+    .value {
+      font-size: 10px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  
+  <div class="controls">
+    <div class="control-group">
+      <label>Bloom Mode</label>
+      <label class="radio-label"><input type="radio" name="bloom-mode" value="simple" checked> Простий</label>
+      <label class="radio-label"><input type="radio" name="bloom-mode" value="selective"> Селективний</label>
+    </div>
+    
+    <div class="control-group">
+      <label>Strength: <span id="strength-value" class="value">1.5</span></label>
+      <input type="range" id="strength" min="0" max="3" step="0.1" value="1.5">
+    </div>
+    
+    <div class="control-group">
+      <label>Threshold: <span id="threshold-value" class="value">0.1</span></label>
+      <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.1">
+    </div>
+    
+    <div class="control-group">
+      <label>Radius: <span id="radius-value" class="value">0.4</span></label>
+      <input type="range" id="radius" min="0" max="1" step="0.01" value="0.4">
+    </div>
+    
+    <div class="control-group">
+      <label>Exposure: <span id="exposure-value" class="value">1</span></label>
+      <input type="range" id="exposure" min="0.1" max="2" step="0.1" value="1">
+    </div>
+    
+    <div class="control-group">
+      <label>Glow Intensity: <span id="glow-intensity-value" class="value">2</span></label>
+      <input type="range" id="glow-intensity" min="0" max="5" step="0.1" value="2">
+    </div>
+    
+    <div class="control-group">
+      <label>Glow Hue: <span id="glow-hue-value" class="value">0.6</span></label>
+      <input type="range" id="glow-hue" min="0" max="1" step="0.01" value="0.6">
+    </div>
+    
+    <button id="pulse-button">Увімкнути пульсацію</button>
+  </div>
+
+<!-- Three.js та додатки через CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+  // Глобальні змінні
+  let scene, camera, renderer, composer, simpleComposer, selectiveComposer;
+  let model, glowMeshes = [];
+  let currentBloomMode = 'simple';
+  let pulseEnabled = false;
+  let pulseSpeed = 2.0;
+  let pulseIntensity = 1.0;
+
+  // Настройки bloom
+  const bloomParams = {
+    exposure: 1,
+    bloomStrength: 1.5,
+    bloomThreshold: 0.1,
+    bloomRadius: 0.4
+  };
+
+  // Настройки glow
+  const glowParams = {
+    intensity: 2.0,
+    hue: 0.6
+  };
+
+  // Шейдери для селективного bloom
+  const vertexShader = `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const fragmentShader = `
+    uniform sampler2D baseTexture;
+    uniform sampler2D bloomTexture;
+    varying vec2 vUv;
+    
+    void main() {
+      gl_FragColor = (texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv));
+    }
+  `;
+
+  // Ініціалізація
+  function init() {
+    const container = document.getElementById('app');
+
+    // Сцена
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0a);
+
+    // Камера
+    camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(2.5, 1.8, 3.5);
+
+    // Рендерер
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ReinhardToneMapping;
+    renderer.toneMappingExposure = bloomParams.exposure;
+    container.appendChild(renderer.domElement);
+
+    // Контролери
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Освітлення
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 5, 5);
+    scene.add(directionalLight);
+
+    // Ініціалізація композиторів
+    initSimpleBloom();
+    initSelectiveBloom();
+
+    // Завантаження моделі
+    loadModel();
+
+    // Налаштування UI
+    setupUI();
+
+    // Запуск анімації
+    animate();
+
+    // Обробник зміни розміру вікна
+    window.addEventListener('resize', onWindowResize);
+  }
+
+  // Простий bloom композитор
+  function initSimpleBloom() {
+    const renderPass = new THREE.RenderPass(scene, camera);
+    const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+    bloomPass.threshold = bloomParams.bloomThreshold;
+    bloomPass.strength = bloomParams.bloomStrength;
+    bloomPass.radius = bloomParams.bloomRadius;
+
+    simpleComposer = new THREE.EffectComposer(renderer);
+    simpleComposer.addPass(renderPass);
+    simpleComposer.addPass(bloomPass);
+  }
+
+  // Селективний bloom композитор
+  function initSelectiveBloom() {
+    const renderPass = new THREE.RenderPass(scene, camera);
+    const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+
+    selectiveComposer = new THREE.EffectComposer(renderer);
+    selectiveComposer.addPass(renderPass);
+    selectiveComposer.addPass(bloomPass);
+
+    // Композитор для змішування
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(renderPass);
+
+    const finalPass = new THREE.ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: {
+          baseTexture: { value: null },
+          bloomTexture: { value: selectiveComposer.renderTarget2.texture }
+        },
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        defines: {}
+      }), 'baseTexture'
+    );
+    finalPass.needsSwap = true;
+    composer.addPass(finalPass);
+  }
+
+  // Завантаження моделі
+  function loadModel() {
+    const loader = new THREE.GLTFLoader();
+    
+    // Спочатку пробуємо завантажити Susanna1.glb
+    loader.load(
+      './Susanna1.glb',
+      function(gltf) {
+        model = gltf.scene;
+        scene.add(model);
+        addInnerGlow();
+        console.log('Модель Susanna1.glb успішно завантажена');
+      },
+      function(progress) {
+        console.log('Завантаження:', (progress.loaded / progress.total * 100) + '%');
+      },
+      function(error) {
+        console.log('Помилка завантаження Susanna1.glb, пробую Susanna.glb...', error);
+        
+        // Якщо не вдалося, пробуємо Susanna.glb
+        loader.load(
+          './Susanna.glb',
+          function(gltf) {
+            model = gltf.scene;
+            scene.add(model);
+            addInnerGlow();
+            console.log('Модель Susanna.glb успішно завантажена');
+          },
+          function(progress) {
+            console.log('Завантаження:', (progress.loaded / progress.total * 100) + '%');
+          },
+          function(error) {
+            console.error('Не вдалося завантажити жодну модель:', error);
+          }
+        );
+      }
+    );
+  }
+
+  // Додавання внутрішнього свічення
+  function addInnerGlow() {
+    if (!model) return;
+
+    glowMeshes = [];
+    const meshesToProcess = [];
+    
+    model.traverse(function(child) {
+      if (child.isMesh) {
+        meshesToProcess.push(child);
+      }
+    });
+
+    meshesToProcess.forEach(mesh => {
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setHSL(glowParams.hue, 1, 0.5),
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.BackSide
+      });
+
+      const glowMesh = new THREE.Mesh(mesh.geometry, glowMaterial);
+      glowMesh.scale.multiplyScalar(1.02);
+      glowMesh.layers.enable(1);
+      
+      model.add(glowMesh);
+      glowMeshes.push(glowMesh);
+    });
+
+    console.log('Додано внутрішнє свічення до', glowMeshes.length, 'мешів');
+  }
+
+  // Оновлення пульсації
+  function updatePulse() {
+    if (!pulseEnabled || glowMeshes.length === 0) return;
+
+    const time = Date.now() * 0.001;
+    const pulse = Math.sin(time * pulseSpeed) * 0.5 + 0.5;
+    const intensity = glowParams.intensity * (0.5 + pulse * pulseIntensity);
+
+    glowMeshes.forEach(mesh => {
+      const hsl = {};
+      mesh.material.color.getHSL(hsl);
+      mesh.material.color.setHSL(glowParams.hue, 1, 0.3 + intensity * 0.2);
+      mesh.material.opacity = 0.4 + intensity * 0.2;
+    });
+  }
+
+  // Налаштування UI
+  function setupUI() {
+    // Bloom режим
+    const bloomModeRadios = document.querySelectorAll('input[name="bloom-mode"]');
+    bloomModeRadios.forEach(radio => {
+      radio.addEventListener('change', function() {
+        currentBloomMode = this.value;
+      });
+    });
+
+    // Слайдери
+    const strengthSlider = document.getElementById('strength');
+    const thresholdSlider = document.getElementById('threshold');
+    const radiusSlider = document.getElementById('radius');
+    const exposureSlider = document.getElementById('exposure');
+    const glowIntensitySlider = document.getElementById('glow-intensity');
+    const glowHueSlider = document.getElementById('glow-hue');
+
+    // Значення слайдерів
+    const strengthValue = document.getElementById('strength-value');
+    const thresholdValue = document.getElementById('threshold-value');
+    const radiusValue = document.getElementById('radius-value');
+    const exposureValue = document.getElementById('exposure-value');
+    const glowIntensityValue = document.getElementById('glow-intensity-value');
+    const glowHueValue = document.getElementById('glow-hue-value');
+
+    // Обробники слайдерів
+    strengthSlider.addEventListener('input', function() {
+      bloomParams.bloomStrength = parseFloat(this.value);
+      strengthValue.textContent = this.value;
+      updateBloomParams();
+    });
+
+    thresholdSlider.addEventListener('input', function() {
+      bloomParams.bloomThreshold = parseFloat(this.value);
+      thresholdValue.textContent = this.value;
+      updateBloomParams();
+    });
+
+    radiusSlider.addEventListener('input', function() {
+      bloomParams.bloomRadius = parseFloat(this.value);
+      radiusValue.textContent = this.value;
+      updateBloomParams();
+    });
+
+    exposureSlider.addEventListener('input', function() {
+      bloomParams.exposure = parseFloat(this.value);
+      exposureValue.textContent = this.value;
+      renderer.toneMappingExposure = bloomParams.exposure;
+    });
+
+    glowIntensitySlider.addEventListener('input', function() {
+      glowParams.intensity = parseFloat(this.value);
+      glowIntensityValue.textContent = this.value;
+      updateGlowParams();
+    });
+
+    glowHueSlider.addEventListener('input', function() {
+      glowParams.hue = parseFloat(this.value);
+      glowHueValue.textContent = this.value;
+      updateGlowParams();
+    });
+
+    // Кнопка пульсації
+    const pulseButton = document.getElementById('pulse-button');
+    pulseButton.addEventListener('click', function() {
+      pulseEnabled = !pulseEnabled;
+      this.textContent = pulseEnabled ? 'Вимкнути пульсацію' : 'Увімкнути пульсацію';
+    });
+  }
+
+  // Оновлення параметрів bloom
+  function updateBloomParams() {
+    if (simpleComposer && simpleComposer.passes[1]) {
+      const bloomPass = simpleComposer.passes[1];
+      bloomPass.strength = bloomParams.bloomStrength;
+      bloomPass.threshold = bloomParams.bloomThreshold;
+      bloomPass.radius = bloomParams.bloomRadius;
+    }
+    
+    if (selectiveComposer && selectiveComposer.passes[1]) {
+      const bloomPass = selectiveComposer.passes[1];
+      bloomPass.strength = bloomParams.bloomStrength;
+      bloomPass.threshold = bloomParams.bloomThreshold;
+      bloomPass.radius = bloomParams.bloomRadius;
+    }
+  }
+
+  // Оновлення параметрів glow
+  function updateGlowParams() {
+    glowMeshes.forEach(mesh => {
+      mesh.material.color.setHSL(glowParams.hue, 1, 0.5);
+    });
+  }
+
+  // Обробник зміни розміру вікна
+  function onWindowResize() {
+    const container = document.getElementById('app');
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    
+    if (simpleComposer) simpleComposer.setSize(container.clientWidth, container.clientHeight);
+    if (selectiveComposer) selectiveComposer.setSize(container.clientWidth, container.clientHeight);
+    if (composer) composer.setSize(container.clientWidth, container.clientHeight);
+  }
+
+  // Анімаційний цикл
+  function animate() {
+    requestAnimationFrame(animate);
+    
+    updatePulse();
+    
+    // Рендеринг залежно від режиму bloom
+    if (currentBloomMode === 'simple') {
+      simpleComposer.render();
+    } else {
+      // Селективний bloom
+      camera.layers.set(1);
+      selectiveComposer.render();
+      camera.layers.set(0);
+      composer.render();
+    }
+  }
+
+  // Запуск після завантаження сторінки
+  window.addEventListener('load', init);
+</script>
+
+</body>
+</html>

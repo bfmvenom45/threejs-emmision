@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GLB + Unreal Bloom (three.js)</title>
+  <style>
+    html,body { height:100%; margin:0; background:#0a0a0a; }
+    #app { width:100%; height:100%; }
+    .panel {
+      position: fixed; top: 12px; left: 12px; 
+      background: rgba(20,20,20,0.7); color:#fff; padding:10px 12px; 
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto; border-radius:12px;
+      backdrop-filter: blur(6px);
+    }
+    .panel label { display:block; margin:8px 0 2px; opacity:.8 }
+    .panel input { width:180px; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="panel">
+  <label>Bloom strength</label>
+  <input id="strength" type="range" min="0" max="3" step="0.01" value="1.2">
+  <label>Bloom threshold</label>
+  <input id="threshold" type="range" min="0" max="1" step="0.001" value="0.8">
+  <label>Bloom radius</label>
+  <input id="radius" type="range" min="0" max="1" step="0.001" value="0.55">
+  <label>Exposure</label>
+  <input id="exposure" type="range" min="0" max="2" step="0.01" value="1.0">
+  <label>Glow Intensity</label>
+  <input id="glow" type="range" min="0" max="3" step="0.1" value="1.5">
+  <label>Glow Color (Hue)</label>
+  <input id="glowHue" type="range" min="0" max="360" step="1" value="200">
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+  // ----- базова сцена
+  const container = document.getElementById('app');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+  camera.position.set(2.5, 1.8, 3.5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  // світло (не впливає на emission, але додає глибини)
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
+  key.position.set(3, 5, 2);
+  scene.add(key, new THREE.AmbientLight(0xffffff, 0.25));
+
+  // Функція для створення ефекту внутрішнього світіння
+  function addInnerGlow(object) {
+    // Збираємо всі mesh об'єкти спочатку, щоб уникнути рекурсії
+    const meshes = [];
+    object.traverse((child) => {
+      if (child.isMesh && child.material && !child.userData.isOutline) {
+        meshes.push(child);
+      }
+    });
+    
+    // Тепер обробляємо кожен mesh окремо
+    meshes.forEach((child) => {
+      try {
+        // Перевіряємо, чи вже обробили цей mesh
+        if (child.userData.glowApplied) return;
+        
+        // Позначаємо, що обробили цей mesh
+        child.userData.glowApplied = true;
+        
+        // Зберігаємо оригінальний матеріал або створюємо новий
+        let glowMaterial;
+        if (child.material.isArray) {
+          // Якщо матеріал - масив, обробляємо перший
+          glowMaterial = child.material[0].clone();
+        } else {
+          glowMaterial = child.material.clone();
+        }
+        
+        // Налаштовуємо емісію для внутрішнього світіння
+        glowMaterial.emissive = new THREE.Color(0x00aaff); // Блакитне світіння
+        glowMaterial.emissiveIntensity = 1.5;
+        
+        // Додаємо прозорість для ефекту
+        glowMaterial.transparent = true;
+        glowMaterial.opacity = 0.9;
+        
+        // Налаштовуємо основний колір з легким відтінком
+        glowMaterial.color = new THREE.Color(0x2244aa);
+        
+        child.material = glowMaterial;
+        
+        // Створюємо додатковий mesh для контурного світіння
+        if (child.geometry) {
+          const outlineGeometry = child.geometry.clone();
+          const outlineMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ddff,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.BackSide // Показуємо тільки зворотню сторону
+          });
+          
+          const outlineMesh = new THREE.Mesh(outlineGeometry, outlineMaterial);
+          outlineMesh.scale.multiplyScalar(1.05); // Трохи збільшуємо для контуру
+          
+          // Позначаємо як outline, щоб уникнути повторної обробки
+          outlineMesh.userData.isOutline = true;
+          
+          // Додаємо контур як дочірній об'єкт
+          child.add(outlineMesh);
+        }
+      } catch (error) {
+        console.warn('Помилка при застосуванні ефекту світіння до mesh:', error);
+      }
+    });
+  }
+
+  // Функція для створення простого об'єкта як fallback
+  function createFallbackObject() {
+    console.log('Створюю резервний об\'єкт...');
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ 
+      color: 0x2244aa,
+      emissive: 0x00aaff,
+      emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.9
+    });
+    const cube = new THREE.Mesh(geometry, material);
+    
+    // Позначаємо, що ефект застосований
+    cube.userData.glowApplied = true;
+    
+    // Додаємо контур до куба
+    const outlineGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ddff,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.BackSide
+    });
+    const outlineCube = new THREE.Mesh(outlineGeometry, outlineMaterial);
+    outlineCube.scale.multiplyScalar(1.05);
+    outlineCube.userData.isOutline = true;
+    cube.add(outlineCube);
+    
+    // Зберігаємо посилання для контролів
+    currentModel = cube;
+    
+    scene.add(cube);
+    console.log('Резервний куб з ефектом світіння додано до сцени');
+  }
+
+  // ----- постпроцес (як у прикладі three.js)
+  const renderPass = new RenderPass(scene, camera);
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(container.clientWidth, container.clientHeight),
+    1.2,   // strength
+    0.55,  // radius
+    0.8    // threshold
+  );
+  const composer = new EffectComposer(renderer);
+  composer.addPass(renderPass);
+  composer.addPass(bloomPass);
+
+  // ----- завантаження GLB
+  const loader = new GLTFLoader();
+  
+  console.log('Спроба завантаження моделі...');
+  
+  // Спочатку спробуємо завантажити модель
+  loader.load(
+    './Susanna1.glb',
+    // onLoad
+    (gltf) => {
+      console.log('Модель успішно завантажена:', gltf);
+      const root = gltf.scene;
+      scene.add(root);
+
+    // Нормалізуємо масштаб/позицію (щоб модель була в кадрі)
+    root.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = o.receiveShadow = true;
+        // ВАЖЛИВО: для емісії у glTF використовуйте emmisive / emissiveIntensity
+        // Якщо ти експортував KHR_materials_emissive_strength — three.js читає це як material.emissiveIntensity
+        if (o.material && o.material.emissive) {
+          // якщо хочеш трохи підсвітити емісію
+          o.material.emissiveIntensity = Math.max(o.material.emissiveIntensity ?? 1.0, 1.2);
+          o.material.needsUpdate = true;
+        }
+      }
+    });
+
+    // центрируємо модель у сцені
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    root.position.sub(center);               // перемістили центр моделі в (0,0,0)
+    const scale = 2.0 / size;                // нормальний масштаб у кадрі
+    root.scale.setScalar(scale);
+    
+    // Застосовуємо ефект внутрішнього світіння
+    addInnerGlow(root);
+    
+    // Зберігаємо посилання для динамічного оновлення
+    currentModel = root;
+    
+    console.log('Модель з ефектом світіння додана до сцени. Розмір:', size, 'Масштаб:', scale);
+    },
+    // onProgress
+    (progress) => {
+      console.log('Прогрес завантаження:', (progress.loaded / progress.total * 100) + '%');
+    },
+    // onError
+    (error) => {
+      console.error('Помилка завантаження моделі:', error);
+      console.log('Спроба завантаження альтернативної моделі...');
+      
+      // Спробуємо завантажити іншу модель
+      loader.load('./Susanna.glb', (gltf) => {
+        console.log('Альтернативна модель завантажена');
+        const root = gltf.scene;
+        scene.add(root);
+        
+        // Той самий код нормалізації
+        root.traverse(o => {
+          if (o.isMesh) {
+            o.castShadow = o.receiveShadow = true;
+            if (o.material && o.material.emissive) {
+              o.material.emissiveIntensity = Math.max(o.material.emissiveIntensity ?? 1.0, 1.2);
+              o.material.needsUpdate = true;
+            }
+          }
+        });
+        
+        const box = new THREE.Box3().setFromObject(root);
+        const size = box.getSize(new THREE.Vector3()).length();
+        const center = box.getCenter(new THREE.Vector3());
+        root.position.sub(center);
+        const scale = 2.0 / size;
+        root.scale.setScalar(scale);
+        
+        // Застосовуємо ефект внутрішнього світіння
+        addInnerGlow(root);
+        
+        // Зберігаємо посилання для динамічного оновлення
+        currentModel = root;
+      }, undefined, (err) => {
+        console.error('Помилка завантаження альтернативної моделі:', err);
+        // Створимо простий куб як fallback
+        createFallbackObject();
+      });
+    }
+  );
+
+  // ----- UI-повзунки
+  const strengthEl = document.getElementById('strength');
+  const thresholdEl = document.getElementById('threshold');
+  const radiusEl = document.getElementById('radius');
+  const exposureEl = document.getElementById('exposure');
+  const glowEl = document.getElementById('glow');
+  const glowHueEl = document.getElementById('glowHue');
+
+  let currentModel = null;
+
+  const sync = () => {
+    bloomPass.strength  = parseFloat(strengthEl.value);
+    bloomPass.threshold = parseFloat(thresholdEl.value);
+    bloomPass.radius    = parseFloat(radiusEl.value);
+    renderer.toneMappingExposure = parseFloat(exposureEl.value);
+    
+    // Оновлюємо параметри світіння моделі
+    if (currentModel) {
+      const glowIntensity = parseFloat(glowEl.value);
+      const hue = parseFloat(glowHueEl.value) / 360;
+      const glowColor = new THREE.Color().setHSL(hue, 0.8, 0.5);
+      
+      currentModel.traverse((child) => {
+        if (child.isMesh && child.material && child.userData.glowApplied) {
+          // Оновлюємо емісію основного матеріалу
+          if (child.material.emissive) {
+            child.material.emissive.copy(glowColor);
+            child.material.emissiveIntensity = glowIntensity;
+          }
+          
+          // Оновлюємо контур
+          child.children.forEach(outline => {
+            if (outline.userData.isOutline && outline.material && outline.material.color) {
+              outline.material.color.copy(glowColor).multiplyScalar(1.2);
+            }
+          });
+        }
+      });
+    }
+  };
+  [strengthEl, thresholdEl, radiusEl, exposureEl, glowEl, glowHueEl].forEach(el => el.addEventListener('input', sync));
+  sync();
+
+  // ----- resize
+  window.addEventListener('resize', () => {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+    composer.setSize(w, h);
+  });
+
+  // ----- анімація
+  const clock = new THREE.Clock();
+  (function animate() {
+    const dt = clock.getDelta();
+    controls.update();
+    composer.render(dt);
+    requestAnimationFrame(animate);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GLB + Unreal Bloom (three.js ES Modules)</title>
+  <style>
+    html,body { height:100%; margin:0; background:#0a0a0a; }
+    #app { width:100%; height:100%; }
+    .panel {
+      position: fixed; top: 12px; left: 12px; 
+      background: rgba(20,20,20,0.7); color:#fff; padding:10px 12px; 
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto; border-radius:12px;
+      backdrop-filter: blur(6px);
+    }
+    .panel label { display:block; margin:8px 0 2px; opacity:.8 }
+    .panel input { width:180px; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="panel">
+  <label>Bloom strength</label>
+  <input id="strength" type="range" min="0" max="3" step="0.01" value="1.2">
+  <label>Bloom threshold</label>
+  <input id="threshold" type="range" min="0" max="1" step="0.001" value="0.8">
+  <label>Bloom radius</label>
+  <input id="radius" type="range" min="0" max="1" step="0.001" value="0.55">
+  <label>Exposure</label>
+  <input id="exposure" type="range" min="0" max="2" step="0.01" value="1.0">
+  <label>Glow Intensity</label>
+  <input id="glow" type="range" min="0" max="3" step="0.1" value="1.5">
+  <label>Glow Color (Hue)</label>
+  <input id="glowHue" type="range" min="0" max="360" step="1" value="200">
+  
+  <hr style="margin: 12px 0; border: 1px solid rgba(255,255,255,0.3);">
+  <label style="display: flex; align-items: center; margin: 8px 0;">
+    <input type="radio" name="bloomMode" value="simple" checked style="margin-right: 8px;"> 
+    Простий Bloom
+  </label>
+  <label style="display: flex; align-items: center; margin: 8px 0;">
+    <input type="radio" name="bloomMode" value="selective" style="margin-right: 8px;"> 
+    Селективний Bloom (Three.js)
+  </label>
+  
+  <hr style="margin: 12px 0; border: 1px solid rgba(255,255,255,0.3);">
+  <button id="pulseToggle" style="width: 100%; padding: 8px; margin: 8px 0; background: rgba(0,170,255,0.3); color: white; border: 1px solid #00aaff; border-radius: 6px; cursor: pointer; font-size: 13px;">
+    💫 Увімкнути пульсацію
+  </button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+  // ----- базова сцена
+  const container = document.getElementById('app');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+  camera.position.set(2.5, 1.8, 3.5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  // ----- Змінні для різних режимів bloom -----
+  let bloomMode = 'simple'; // 'simple' або 'selective'
+  let currentModel = null;
+  let innerLight, innerLight2;
+  
+  // Анімація пульсації
+  let pulseEnabled = false;
+  let pulseTime = 0;
+  const pulseSpeed = 2.0; // швидкість пульсації
+  const pulseIntensity = 0.5; // інтенсивність пульсації
+  let baseLightIntensity = 3.0; // базова яскравість
+  let baseGlowIntensity = 1.5; // базова яскравість glow
+  
+  // Для простого режиму
+  let simpleComposer;
+  
+  // Для селективного режиму
+  const ENTIRE_SCENE = 0, BLOOM_SCENE = 1;
+  let bloomComposer, finalComposer, finalPass;
+  const bloomLayer = new THREE.Layers();
+  bloomLayer.set(BLOOM_SCENE);
+  const darkMaterial = new THREE.MeshBasicMaterial({ color: 'black' });
+  const materialsCache = [];
+
+  // ----- Функції для роботи з bloom -----
+  function initSimpleBloom() {
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(container.clientWidth, container.clientHeight),
+      1.2, 0.55, 0.8
+    );
+    
+    simpleComposer = new EffectComposer(renderer);
+    simpleComposer.addPass(renderPass);
+    simpleComposer.addPass(bloomPass);
+    
+    return { renderPass, bloomPass };
+  }
+  
+  function initSelectiveBloom() {
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(container.clientWidth, container.clientHeight),
+      1.5, 0.4, 0.85
+    );
+    
+    bloomComposer = new EffectComposer(renderer);
+    bloomComposer.renderToScreen = false;
+    bloomComposer.addPass(renderPass);
+    bloomComposer.addPass(bloomPass);
+    
+    finalPass = new ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: {
+          baseTexture: { value: null },
+          bloomTexture: { value: bloomComposer.renderTarget2.texture }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+          }
+        `,
+        fragmentShader: `
+          uniform sampler2D baseTexture;
+          uniform sampler2D bloomTexture;
+          varying vec2 vUv;
+          void main() {
+            gl_FragColor = ( texture2D( baseTexture, vUv ) + vec4( 1.0 ) * texture2D( bloomTexture, vUv ) );
+          }
+        `,
+        defines: {}
+      }), 'baseTexture'
+    );
+    finalPass.needsSwap = true;
+    
+    finalComposer = new EffectComposer(renderer);
+    finalComposer.addPass(renderPass);
+    finalComposer.addPass(finalPass);
+    
+    return { renderPass, bloomPass };
+  }
+  
+  function renderBloom(mask) {
+    if (mask === true) {
+      scene.traverse(darkenNonBloomed);
+      bloomComposer.render();
+      scene.traverse(restoreMaterial);
+    } else {
+      camera.layers.set(BLOOM_SCENE);
+      bloomComposer.render();
+      camera.layers.set(ENTIRE_SCENE);
+    }
+  }
+  
+  function darkenNonBloomed(obj) {
+    if (obj.isMesh && bloomLayer.test(obj.layers) === false) {
+      materialsCache[obj.uuid] = obj.material;
+      obj.material = darkMaterial;
+    }
+  }
+  
+  function restoreMaterial(obj) {
+    if (materialsCache[obj.uuid]) {
+      obj.material = materialsCache[obj.uuid];
+      delete materialsCache[obj.uuid];
+    }
+  }
+  
+  // Функція пульсації світла
+  function updatePulse(deltaTime) {
+    if (!pulseEnabled) return;
+    
+    pulseTime += deltaTime * pulseSpeed;
+    const pulse = Math.sin(pulseTime) * pulseIntensity + 1.0; // коефіцієнт від 0.5 до 1.5
+    
+    // Пульсація внутрішнього світла (тільки для простого режиму)
+    if (bloomMode === 'simple' && innerLight && innerLight2) {
+      innerLight.intensity = baseLightIntensity * pulse;
+      innerLight2.intensity = (baseLightIntensity * 0.7) * pulse;
+    }
+    
+    // Пульсація емісивних матеріалів
+    if (currentModel) {
+      const currentGlowIntensity = baseGlowIntensity * pulse;
+      
+      currentModel.traverse((child) => {
+        if (child.isMesh && child.material && child.userData.glowApplied) {
+          if (child.material.emissive) {
+            child.material.emissiveIntensity = currentGlowIntensity;
+          }
+        }
+      });
+    }
+  }
+  
+  function togglePulse() {
+    pulseEnabled = !pulseEnabled;
+    const button = document.getElementById('pulseToggle');
+    
+    if (pulseEnabled) {
+      button.textContent = '💫 Вимкнути пульсацію';
+      button.style.background = 'rgba(255,100,100,0.3)';
+      button.style.borderColor = '#ff6464';
+      pulseTime = 0; // скидаємо час
+    } else {
+      button.textContent = '💫 Увімкнути пульсацію';
+      button.style.background = 'rgba(0,170,255,0.3)';
+      button.style.borderColor = '#00aaff';
+      
+      // Повертаємо нормальні значення
+      if (bloomMode === 'simple' && innerLight && innerLight2) {
+        innerLight.intensity = baseLightIntensity;
+        innerLight2.intensity = baseLightIntensity * 0.7;
+      }
+      
+      if (currentModel) {
+        currentModel.traverse((child) => {
+          if (child.isMesh && child.material && child.userData.glowApplied) {
+            if (child.material.emissive) {
+              child.material.emissiveIntensity = baseGlowIntensity;
+            }
+          }
+        });
+      }
+    }
+  }
+
+  // світло
+  scene.add(new THREE.AmbientLight(0x404040, 0.1)); // темне ambient світло
+
+  // ----- Ініціалізація bloom режимів -----
+  const simpleBloom = initSimpleBloom();
+  const selectiveBloom = initSelectiveBloom();
+  
+  // Починаємо з простого режиму
+  let currentBloomPass = simpleBloom.bloomPass;
+  
+  // Світло зі середини моделі (тільки для простого режиму)
+  function initLights() {
+    innerLight = new THREE.PointLight(0x00aaff, 3.0, 15);
+    innerLight.position.set(0, 0, 0);
+    
+    innerLight2 = new THREE.PointLight(0x0088dd, 2.0, 8);
+    innerLight2.position.set(0, 0.2, 0);
+    
+    scene.add(innerLight, innerLight2);
+  }
+  
+  function switchBloomMode(mode) {
+    bloomMode = mode;
+    
+    if (mode === 'simple') {
+      // Простий режим - додаємо світло
+      if (!innerLight) initLights();
+      
+      // Прибираємо bloom layers з моделі
+      if (currentModel) {
+        currentModel.traverse((child) => {
+          if (child.isMesh) {
+            child.layers.disable(BLOOM_SCENE);
+          }
+        });
+      }
+    } else {
+      // Селективний режим - прибираємо світло
+      if (innerLight) {
+        scene.remove(innerLight, innerLight2);
+        innerLight = innerLight2 = null;
+      }
+      
+      // Додаємо bloom layers до моделі
+      if (currentModel) {
+        currentModel.traverse((child) => {
+          if (child.isMesh && child.material && child.material.emissive) {
+            child.layers.enable(BLOOM_SCENE);
+          }
+        });
+      }
+    }
+  }
+
+  initLights();
+
+  // Композитори створюються в функціях initSimpleBloom() та initSelectiveBloom()
+
+  // ----- завантаження GLB
+  const loader = new GLTFLoader();
+  
+  console.log('Спроба завантаження моделі...');
+  
+  // Функція для створення ефекту внутрішнього світіння
+  function addInnerGlow(object) {
+    // Збираємо всі mesh об'єкти спочатку, щоб уникнути рекурсії
+    const meshes = [];
+    object.traverse((child) => {
+      if (child.isMesh && child.material && !child.userData.isOutline) {
+        meshes.push(child);
+      }
+    });
+    
+    // Тепер обробляємо кожен mesh окремо
+    meshes.forEach((child) => {
+      try {
+        // Перевіряємо, чи вже обробили цей mesh
+        if (child.userData.glowApplied) return;
+        
+        // Позначаємо, що обробили цей mesh
+        child.userData.glowApplied = true;
+        
+        // Зберігаємо оригінальний матеріал або створюємо новий
+        let glowMaterial;
+        if (child.material.isArray) {
+          // Якщо матеріал - масив, обробляємо перший
+          glowMaterial = child.material[0].clone();
+        } else {
+          glowMaterial = child.material.clone();
+        }
+        
+        // Налаштовуємо емісію для внутрішнього світіння
+        glowMaterial.emissive = new THREE.Color(0x00aaff); // Блакитне світіння
+        glowMaterial.emissiveIntensity = 1.5;
+        
+        // Додаємо прозорість для ефекту
+        glowMaterial.transparent = true;
+        glowMaterial.opacity = 0.9;
+        
+        // Налаштовуємо основний колір з легким відтінком
+        glowMaterial.color = new THREE.Color(0x2244aa);
+        
+        child.material = glowMaterial;
+        
+        // Створюємо додатковий mesh для контурного світіння
+        if (child.geometry) {
+          const outlineGeometry = child.geometry.clone();
+          const outlineMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ddff,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.BackSide // Показуємо тільки зворотну сторону
+          });
+          
+          const outlineMesh = new THREE.Mesh(outlineGeometry, outlineMaterial);
+          outlineMesh.scale.multiplyScalar(1.05); // Трохи збільшуємо для контуру
+          
+          // Позначаємо як outline, щоб уникнути повторної обробки
+          outlineMesh.userData.isOutline = true;
+          
+          // Додаємо контур як дочірний об'єкт
+          child.add(outlineMesh);
+        }
+      } catch (error) {
+        console.warn('Помилка при застосуванні ефекту світіння до mesh:', error);
+      }
+    });
+  }
+
+  // Функція для створення простого об'єкта як fallback
+  function createFallbackObject() {
+    console.log('Створюю резервний об\'єкт...');
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ 
+      color: 0x2244aa,
+      emissive: 0x00aaff,
+      emissiveIntensity: 1.5,
+      transparent: true,
+      opacity: 0.9
+    });
+    const cube = new THREE.Mesh(geometry, material);
+    
+    // Позначаємо, що ефект застосований
+    cube.userData.glowApplied = true;
+    
+    // Зберігаємо посилання для контролів
+    currentModel = cube;
+    
+    scene.add(cube);
+    console.log('Резервний куб з ефектом світіння додано до сцени');
+  }
+
+  // Спочатку спробуємо завантажити модель
+  loader.load(
+    './Susanna1.glb',
+    // onLoad
+    (gltf) => {
+      console.log('Модель успішно завантажена:', gltf);
+      const root = gltf.scene;
+      scene.add(root);
+
+    // Нормалізуємо масштаб/позицію (щоб модель була в кадрі)
+    root.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = o.receiveShadow = true;
+        // ВАЖЛИВО: для емісії у glTF використовуйте emmisive / emissiveIntensity
+        // Якщо ти експортував KHR_materials_emissive_strength — three.js читає це як material.emissiveIntensity
+        if (o.material && o.material.emissive) {
+          // якщо хочеш трохи підсвітити емісію
+          o.material.emissiveIntensity = Math.max(o.material.emissiveIntensity ?? 1.0, 1.2);
+          o.material.needsUpdate = true;
+        }
+      }
+    });
+
+    // центрируємо модель у сцені
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    root.position.sub(center);               // перемістили центр моделі в (0,0,0)
+    const scale = 2.0 / size;                // нормальний масштаб у кадрі
+    root.scale.setScalar(scale);
+    
+    // Застосовуємо ефект внутрішнього світіння
+    addInnerGlow(root);
+    
+    // Зберігаємо посилання для контролів
+    currentModel = root;
+    
+    console.log('Модель з ефектом світіння додана до сцени. Розмір:', size, 'Масштаб:', scale);
+    },
+    // onProgress
+    (progress) => {
+      console.log('Прогрес завантаження:', (progress.loaded / progress.total * 100) + '%');
+    },
+    // onError
+    (error) => {
+      console.error('Помилка завантаження моделі:', error);
+      console.log('Спроба завантаження альтернативної моделі...');
+      
+      // Спробуємо завантажити іншу модель
+      loader.load('./Susanna.glb', (gltf) => {
+        console.log('Альтернативна модель завантажена');
+        const root = gltf.scene;
+        scene.add(root);
+        
+        // Той самий код нормалізації
+        root.traverse(o => {
+          if (o.isMesh) {
+            o.castShadow = o.receiveShadow = true;
+            if (o.material && o.material.emissive) {
+              o.material.emissiveIntensity = Math.max(o.material.emissiveIntensity ?? 1.0, 1.2);
+              o.material.needsUpdate = true;
+            }
+          }
+        });
+        
+        const box = new THREE.Box3().setFromObject(root);
+        const size = box.getSize(new THREE.Vector3()).length();
+        const center = box.getCenter(new THREE.Vector3());
+        root.position.sub(center);
+        const scale = 2.0 / size;
+        root.scale.setScalar(scale);
+        
+        // Застосовуємо ефект внутрішнього світіння
+        addInnerGlow(root);
+        
+        // Зберігаємо посилання для контролів
+        currentModel = root;
+      }, undefined, (err) => {
+        console.error('Помилка завантаження альтернативної моделі:', err);
+        // Створимо простий куб як fallback
+        createFallbackObject();
+      });
+    }
+  );
+
+  // ----- UI-повзунки
+  const strengthEl = document.getElementById('strength');
+  const thresholdEl = document.getElementById('threshold');
+  const radiusEl = document.getElementById('radius');
+  const exposureEl = document.getElementById('exposure');
+  const glowEl = document.getElementById('glow');
+  const glowHueEl = document.getElementById('glowHue');
+
+  const sync = () => {
+    // Оновлюємо bloom параметри для поточного режиму
+    currentBloomPass.strength  = parseFloat(strengthEl.value);
+    currentBloomPass.threshold = parseFloat(thresholdEl.value);
+    currentBloomPass.radius    = parseFloat(radiusEl.value);
+    renderer.toneMappingExposure = parseFloat(exposureEl.value);
+    
+    // Оновлюємо параметри світіння моделі
+    if (currentModel) {
+      const glowIntensity = parseFloat(glowEl.value);
+      baseGlowIntensity = glowIntensity; // зберігаємо базове значення
+      const hue = parseFloat(glowHueEl.value) / 360;
+      const glowColor = new THREE.Color().setHSL(hue, 0.8, 0.5);
+      
+      // Оновлюємо внутрішнє світло
+      if (innerLight && innerLight2) {
+        baseLightIntensity = glowIntensity * 2.0; // зберігаємо базове значення
+        innerLight.color.copy(glowColor);
+        innerLight2.color.copy(glowColor).multiplyScalar(0.8);
+        
+        // Оновлюємо інтенсивність тільки якщо не пульсація
+        if (!pulseEnabled) {
+          innerLight.intensity = baseLightIntensity;
+          innerLight2.intensity = baseLightIntensity * 0.7;
+        }
+      }
+      
+      currentModel.traverse((child) => {
+        if (child.isMesh && child.material && child.userData.glowApplied) {
+          // Оновлюємо емісію основного матеріалу
+          if (child.material.emissive) {
+            child.material.emissive.copy(glowColor);
+            // Оновлюємо інтенсивність тільки якщо не пульсація
+            if (!pulseEnabled) {
+              child.material.emissiveIntensity = glowIntensity;
+            }
+          }
+          
+          // Оновлюємо контур
+          child.children.forEach(outline => {
+            if (outline.userData.isOutline && outline.material && outline.material.color) {
+              outline.material.color.copy(glowColor).multiplyScalar(1.2);
+            }
+          });
+        }
+      });
+    }
+  };
+  [strengthEl, thresholdEl, radiusEl, exposureEl, glowEl, glowHueEl].forEach(el => el.addEventListener('input', sync));
+  
+  // Обробники перемикання режимів
+  document.querySelectorAll('input[name="bloomMode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const mode = e.target.value;
+      switchBloomMode(mode);
+      
+      if (mode === 'simple') {
+        currentBloomPass = simpleBloom.bloomPass;
+      } else {
+        currentBloomPass = selectiveBloom.bloomPass;
+        // Вимикаємо пульсацію в селективному режимі
+        if (pulseEnabled) togglePulse();
+      }
+      
+      sync(); // Оновлюємо параметри
+    });
+  });
+  
+  // Обробник кнопки пульсації
+  document.getElementById('pulseToggle').addEventListener('click', togglePulse);
+  
+  sync();
+
+  // ----- resize
+  window.addEventListener('resize', () => {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+    
+    // Оновлюємо розміри для обох композиторів
+    if (simpleComposer) simpleComposer.setSize(w, h);
+    if (bloomComposer) bloomComposer.setSize(w, h);
+    if (finalComposer) finalComposer.setSize(w, h);
+  });
+
+  // ----- анімація
+  const clock = new THREE.Clock();
+  (function animate() {
+    const dt = clock.getDelta();
+    controls.update();
+    
+    // Оновлюємо пульсацію
+    updatePulse(dt);
+    
+    // Рендеримо в залежності від режиму
+    if (bloomMode === 'simple') {
+      simpleComposer.render(dt);
+    } else {
+      renderBloom(true);
+      finalPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
+      finalComposer.render();
+    }
+    
+    requestAnimationFrame(animate);
+  })();
+</script>
+</body>
+</html>
