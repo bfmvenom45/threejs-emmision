@@ -5,20 +5,24 @@
   "framework": "vite",
   "headers": [
     {
-      "source": "/assets/(.*)",
+      "source": "/assets/.*\\.(js|css|woff2?|ttf|eot|ico|png|jpe?g|gif|svg)",
       "headers": [
         {
-          "key": "cache-control",
+          "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
         }
       ]
     },
     {
-      "source": "/(.*\\.(glb|gltf))$",
+      "source": "/.*\\.(glb|gltf)",
       "headers": [
         {
-          "key": "cache-control", 
-          "value": "public, max-age=3600"
+          "key": "Cache-Control", 
+          "value": "public, max-age=86400"
+        },
+        {
+          "key": "Content-Type",
+          "value": "model/gltf-binary"
         }
       ]
     }
