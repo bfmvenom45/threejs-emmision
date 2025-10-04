@@ -5,13 +5,22 @@ export class GlowManager {
     this.glowMeshes = [];
     this.originalMaterials = new Map(); // Зберігаємо оригінальні матеріали
     this.pulseEnabled = false;
-    this.pulseSpeed = 2.0;
+    this.pulseSpeed = 3.0;
     this.pulseIntensity = 1.0;
-    this.glowMode = 'separate'; // 'separate' або 'emissive'
+    this.glowMode = 'emissive'; // 'separate' або 'emissive'
     
     this.params = {
-      intensity: 2.0,
-      hue: 0.6
+      intensity: 2.9,
+      hue: 0.06
+    };
+    
+    // 🎯 Налаштування свічення
+    this.glowSettings = {
+      eyes: true,
+      lights: true,
+      transparent: true,
+      emissive: true,
+      all: false
     };
   }
   
@@ -28,59 +37,43 @@ export class GlowManager {
   }
   
   addEmissiveGlow(model) {
-    // Модифікація оригінальних матеріалів для додання emissive glow тільки на прозорих елементах
+    // Модифікація оригінальних матеріалів для додання emissive glow
     model.traverse((child) => {
       if (child.isMesh && child.material) {
-        // Зберігаємо оригінальний матеріал
-        if (!this.originalMaterials.has(child.uuid)) {
-          this.originalMaterials.set(child.uuid, child.material.clone());
-        }
+        // 🎯 НАЛАШТУВАННЯ ДЛ�я SUSANNA1 - що має світитися:
+        const shouldGlow = this.shouldMeshGlow(child);
         
-        // Перевіряємо чи матеріал прозорий або має альфа-канал
-        const isTransparent = child.material.transparent || 
-                            child.material.opacity < 1.0 || 
-                            (child.material.map && child.material.map.format === THREE.RGBAFormat) ||
-                            child.material.alphaTest > 0;
-        
-        if (isTransparent) {
-          // Робимо матеріал прозорим якщо ще не є
-          child.material.transparent = true;
-          if (child.material.opacity === 1.0) {
-            child.material.opacity = 0.7; // Робимо напівпрозорим
+        if (shouldGlow) {
+          // Зберігаємо оригінальний матеріал
+          if (!this.originalMaterials.has(child.uuid)) {
+            this.originalMaterials.set(child.uuid, child.material.clone());
           }
           
-          // Додаємо emissive свічення тільки до прозорих матеріалів
+          // Додаємо emissive властивості
           if (child.material.emissive) {
-            const glowColor = new THREE.Color().setHSL(this.params.hue, 1, 0.4);
+            const glowColor = new THREE.Color().setHSL(this.params.hue, 1, 0.3);
             child.material.emissive.copy(glowColor);
-            child.material.emissiveIntensity = this.params.intensity * 0.2;
+            child.material.emissiveIntensity = this.params.intensity * 0.1;
           }
           
           // Додаємо до bloom шару
           child.layers.enable(1);
-          this.glowMeshes.push(child);
+          this.glowMeshes.push(child); // Зберігаємо посилання для оновлення
           
-          console.log(`Прозорий матеріал знайдено:`, child.material.name || 'unnamed', 
-                     `opacity: ${child.material.opacity}, transparent: ${child.material.transparent}`);
-        } else {
-          // Для непрозорих матеріалів видаляємо emission
-          if (child.material.emissive) {
-            child.material.emissive.setRGB(0, 0, 0);
-            child.material.emissiveIntensity = 0;
-          }
+          console.log(`✨ Додано свічення до: ${child.name || 'безіменний меш'}`);
         }
       }
     });
     
-    console.log(`Додано emissive свічення до ${this.glowMeshes.length} прозорих матеріалів`);
+    console.log(`Додано emissive свічення до ${this.glowMeshes.length} матеріалів`);
   }
   
   addSeparateGlow(model) {
     const meshesToProcess = [];
     
-    // Збір всіх мешів
+    // Збір тільки тих мешів, що мають світитися
     model.traverse((child) => {
-      if (child.isMesh) {
+      if (child.isMesh && this.shouldMeshGlow(child)) {
         meshesToProcess.push(child);
       }
     });
@@ -91,7 +84,7 @@ export class GlowManager {
         const glowMaterial = new THREE.MeshBasicMaterial({
           color: new THREE.Color().setHSL(this.params.hue, 1, 0.5),
           transparent: true,
-          opacity: 0.6,
+          opacity: 0.2,
           side: THREE.BackSide
         });
         
@@ -101,6 +94,8 @@ export class GlowManager {
         
         model.add(glowMesh);
         this.glowMeshes.push(glowMesh);
+        
+        console.log(`✨ Створено окремий glow для: ${mesh.name || 'безіменний меш'}`);
         
       } catch (error) {
         console.warn('Не вдалося створити glow для меша:', error);
@@ -169,62 +164,6 @@ export class GlowManager {
     return this.glowMode;
   }
   
-  analyzeModelTransparency(model) {
-    // Аналізуємо модель для виявлення прозорих матеріалів
-    const transparentMaterials = [];
-    const opaqueMaterials = [];
-    
-    model.traverse((child) => {
-      if (child.isMesh && child.material) {
-        const material = child.material;
-        const isTransparent = material.transparent || 
-                            material.opacity < 1.0 || 
-                            (material.map && material.map.format === THREE.RGBAFormat) ||
-                            material.alphaTest > 0;
-        
-        if (isTransparent) {
-          transparentMaterials.push({
-            name: material.name || 'unnamed',
-            opacity: material.opacity,
-            transparent: material.transparent,
-            mesh: child
-          });
-        } else {
-          opaqueMaterials.push({
-            name: material.name || 'unnamed',
-            mesh: child
-          });
-        }
-      }
-    });
-    
-    console.log(`Аналіз моделі завершено:
-      - Прозорих матеріалів: ${transparentMaterials.length}
-      - Непрозорих матеріалів: ${opaqueMaterials.length}`);
-    
-    return {
-      transparent: transparentMaterials,
-      opaque: opaqueMaterials
-    };
-  }
-  
-  forceTransparency(model, opacity = 0.6) {
-    // Примусово робимо всі матеріали напівпрозорими для кращого ефекту
-    model.traverse((child) => {
-      if (child.isMesh && child.material) {
-        if (!this.originalMaterials.has(child.uuid)) {
-          this.originalMaterials.set(child.uuid, child.material.clone());
-        }
-        
-        child.material.transparent = true;
-        child.material.opacity = opacity;
-        child.material.alphaTest = 0.1;
-      }
-    });
-    
-    console.log(`Застосовано примусову напівпрозорість (${opacity}) до всієї моделі`);
-  }
-  
   setPulseEnabled(enabled) {
     this.pulseEnabled = enabled;
     console.log('Пульсація', enabled ? 'увімкнена' : 'вимкнена');
@@ -240,16 +179,12 @@ export class GlowManager {
     const intensity = this.params.intensity * (0.5 + pulse * this.pulseIntensity);
     
     if (this.glowMode === 'emissive') {
-      // Оновлення emissive властивостей тільки для прозорих матеріалів
+      // Оновлення emissive властивостей
       this.glowMeshes.forEach(mesh => {
-        if (mesh.material && mesh.material.emissive && mesh.material.transparent) {
-          const glowColor = new THREE.Color().setHSL(this.params.hue, 1, 0.4 + intensity * 0.2);
+        if (mesh.material && mesh.material.emissive) {
+          const glowColor = new THREE.Color().setHSL(this.params.hue, 1, 0.3 + intensity * 0.1);
           mesh.material.emissive.copy(glowColor);
-          mesh.material.emissiveIntensity = intensity * 0.3;
-          
-          // Також модулюємо прозорість для додаткового ефекту
-          const baseOpacity = this.originalMaterials.get(mesh.uuid)?.opacity || 0.7;
-          mesh.material.opacity = Math.max(0.3, baseOpacity * (0.7 + intensity * 0.3));
+          mesh.material.emissiveIntensity = intensity * 0.15;
         }
       });
     } else {
@@ -262,6 +197,70 @@ export class GlowManager {
         }
       });
     }
+  }
+  
+  // 🎯 ГОЛОВНА ФУНКЦІЯ НАЛАШТУВАННЯ - ЩО МАЄ СВІТИТИСЯ
+  shouldMeshGlow(mesh) {
+    // Якщо увімкнено "всі об'єкти" - світиться все
+    if (this.glowSettings.all) {
+      return true;
+    }
+    
+    // ========== НАЛАШТУВАННЯ ДЛЯ SUSANNA1 ==========
+    
+    // 1️⃣ По назві об'єкта (найточніший спосіб)
+    if (mesh.name && this.glowSettings.eyes) {
+      const name = mesh.name.toLowerCase();
+      
+      // Світяться елементи з такими назвами:
+      const eyeNames = ['eye', 'pupil', 'iris'];
+      const hasEyeName = eyeNames.some(keyword => name.includes(keyword));
+      if (hasEyeName) {
+        console.log(`👁️ Знайдено очі для свічення: ${mesh.name}`);
+        return true;
+      }
+    }
+    
+    if (mesh.name && this.glowSettings.lights) {
+      const name = mesh.name.toLowerCase();
+      
+      // Світяться світлові елементи:
+      const lightNames = [
+        'light', 'glow', 'emission', 'lamp', 'bulb', 
+        'neon', 'screen', 'display', 'led', 'torch'
+      ];
+      const hasLightName = lightNames.some(keyword => name.includes(keyword));
+      if (hasLightName) {
+        console.log(`💡 Знайдено світло для свічення: ${mesh.name}`);
+        return true;
+      }
+    }
+    
+    // 2️⃣ По матеріалу (прозорі або emissive)
+    if (mesh.material) {
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      
+      // Світяться прозорі матеріали
+      if (this.glowSettings.transparent && material.transparent && material.opacity < 0.9) {
+        console.log(`🔍 Знайдено прозорий матеріал для свічення: ${mesh.name || 'безіменний'}`);
+        return true;
+      }
+      
+      // Світяться матеріали з emissive кольором
+      if (this.glowSettings.emissive && material.emissive && material.emissive.getHex() > 0) {
+        console.log(`✨ Знайдено emissive матеріал для свічення: ${mesh.name || 'безіменний'}`);
+        return true;
+      }
+    }
+    
+    // 3️⃣ За замовчуванням - НЕ світиться
+    return false;
+  }
+  
+  // 🔧 Оновлення налаштувань світіння
+  updateGlowSettings(settings) {
+    this.glowSettings = { ...this.glowSettings, ...settings };
+    console.log('🎯 Оновлено налаштування світіння:', this.glowSettings);
   }
   
   dispose() {

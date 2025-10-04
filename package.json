@@ -1,31 +1,17 @@
 {
-  "name": "threejs-bloom-glb-viewer",
-  "private": false,
-  "version": "1.0.0",
+  "name": "3d-glb-viewer",
+  "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "description": "3D GLB Viewer with Bloom and Emission Effects using Three.js",
-  "keywords": ["threejs", "webgl", "3d", "glb", "bloom", "emission", "vite"],
-  "author": "bfmvenom45",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/bfmvenom45/threejs-emmision.git"
-  },
-  "homepage": "https://threejs-bloom-glb-viewer.vercel.app",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "vercel --prod"
+    "preview": "vite preview"
   },
   "dependencies": {
     "three": "^0.160.0"
   },
   "devDependencies": {
     "vite": "^5.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
   }
 }

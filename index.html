@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>3D GLB Viewer with Bloom Effects</title>
+  <title>🎆 3D Model Viewer</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
   <link rel="stylesheet" href="/src/styles/main.css">
 </head>
 <body>
@@ -13,26 +15,30 @@
     <!-- Model Selection -->
     <div class="model-selector">
       <h3>Вибір моделі</h3>
+      
+      <!-- File Upload Section -->
+      <div class="file-upload-section">
+        <input type="file" id="file-input" accept=".glb,.gltf" style="display: none;">
+        <button id="upload-button" class="upload-btn">
+          📁 Завантажити GLB/GLTF
+        </button>
+        <div class="drag-hint">
+          💡 Або перетягніть файл на сцену
+        </div>
+        <div id="file-info" class="file-info hidden">
+          <span id="file-name"></span>
+          <button id="clear-file" class="clear-btn">❌</button>
+        </div>
+      </div>
+      
       <div class="model-grid">
-        <div class="model-card active" data-model="House.glb">
-          <div class="model-preview">🏠</div>
-          <span>House</span>
+        <div class="model-card active" data-model="House15.glb">
+          <div class="model-preview">�</div>
+          <span>House 15</span>
         </div>
-        <div class="model-card" data-model="House1.glb">
+        <div class="model-card" data-model="House16.glb">
           <div class="model-preview">🏘️</div>
-          <span>House 1</span>
-        </div>
-        <div class="model-card" data-model="Susanna.glb">
-          <div class="model-preview">👩</div>
-          <span>Susanna</span>
-        </div>
-        <div class="model-card" data-model="Susanna1.glb">
-          <div class="model-preview">👩‍🦰</div>
-          <span>Susanna 1</span>
-        </div>
-        <div class="model-card" data-model="Susanna2.glb">
-          <div class="model-preview">👩‍🦱</div>
-          <span>Susanna 2</span>
+          <span>House 16</span>
         </div>
       </div>
     </div>
@@ -59,19 +65,19 @@
         <label>Glow Mode</label>
         <div class="radio-group">
           <label class="radio-label">
-            <input type="radio" name="glow-mode" value="separate" checked> 
+            <input type="radio" name="glow-mode" value="separate"> 
             Окремі мешi
           </label>
           <label class="radio-label">
-            <input type="radio" name="glow-mode" value="emissive"> 
+            <input type="radio" name="glow-mode" value="emissive" checked> 
             Emissive
           </label>
         </div>
       </div>
       
       <div class="control-section">
-        <label>Strength: <span id="strength-value">1.5</span></label>
-        <input type="range" id="strength" min="0" max="3" step="0.1" value="1.5">
+        <label>Strength: <span id="strength-value">1</span></label>
+        <input type="range" id="strength" min="0" max="3" step="0.1" value="1">
       </div>
       
       <div class="control-section">
@@ -80,36 +86,30 @@
       </div>
       
       <div class="control-section">
-        <label>Radius: <span id="radius-value">0.4</span></label>
-        <input type="range" id="radius" min="0" max="1" step="0.01" value="0.4">
+        <label>Radius: <span id="radius-value">0.55</span></label>
+        <input type="range" id="radius" min="0" max="1" step="0.01" value="0.55">
       </div>
       
       <div class="control-section">
-        <label>Exposure: <span id="exposure-value">1</span></label>
-        <input type="range" id="exposure" min="0.1" max="2" step="0.1" value="1">
+        <label>Exposure: <span id="exposure-value">0.1</span></label>
+        <input type="range" id="exposure" min="0.1" max="2" step="0.1" value="0.1">
       </div>
       
       <div class="control-section">
-        <label>Glow Intensity: <span id="glow-intensity-value">2</span></label>
-        <input type="range" id="glow-intensity" min="0" max="5" step="0.1" value="2">
+        <label>Glow Intensity: <span id="glow-intensity-value">2.9</span></label>
+        <input type="range" id="glow-intensity" min="0" max="5" step="0.1" value="2.9">
       </div>
       
       <div class="control-section">
-        <label>Glow Hue: <span id="glow-hue-value">0.6</span></label>
-        <input type="range" id="glow-hue" min="0" max="1" step="0.01" value="0.6">
-      </div>
-      
-      <div class="control-section">
-        <label>Transparency: <span id="transparency-value">0.6</span></label>
-        <input type="range" id="transparency" min="0.1" max="1" step="0.05" value="0.6">
-      </div>
-      
-      <div class="control-section">
-        <button id="force-transparency-button" class="action-btn">🔍 Зробити прозорим</button>
-        <button id="analyze-button" class="action-btn">📊 Аналіз матеріалів</button>
+        <label>Glow Hue: <span id="glow-hue-value">0.06</span></label>
+        <input type="range" id="glow-hue" min="0" max="1" step="0.01" value="0.06">
       </div>
       
       <button id="pulse-button" class="pulse-btn">💫 Увімкнути пульсацію</button>
+      
+      <!-- Власне освітлення - Приховано -->
+      <!-- Налаштування світіння об'єктів - Приховано -->
+      </div>
     </div>
     
     <!-- Loading Indicator -->

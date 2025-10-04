@@ -7,7 +7,8 @@ export class UIManager {
     this.modelSelectorCallback = null;
     
     this.pulseEnabled = false;
-    this.currentModel = 'House.glb';
+    this.currentModel = 'House15.glb';
+    this.glowMode = 'emissive';
   }
   
   setupBloomControls(callback) {
@@ -40,10 +41,6 @@ export class UIManager {
     
     this.setupSlider('glow-hue', 'glow-hue-value', (value) => {
       callback({ hue: parseFloat(value) });
-    });
-    
-    this.setupSlider('transparency', 'transparency-value', (value) => {
-      callback({ transparency: parseFloat(value) });
     });
   }
   
@@ -86,33 +83,9 @@ export class UIManager {
     });
   }
   
-  setupTransparencyControls(forceTransparencyCallback, analyzeCallback) {
-    const forceButton = document.getElementById('force-transparency-button');
-    const analyzeButton = document.getElementById('analyze-button');
-    
-    if (forceButton) {
-      forceButton.addEventListener('click', () => {
-        const transparency = parseFloat(document.getElementById('transparency')?.value || 0.6);
-        forceTransparencyCallback(transparency);
-        this.showNotification(`Застосовано прозорість ${transparency}`, 'info');
-      });
-    }
-    
-    if (analyzeButton) {
-      analyzeButton.addEventListener('click', () => {
-        const analysis = analyzeCallback();
-        if (analysis) {
-          this.showNotification(
-            `Знайдено: ${analysis.transparent.length} прозорих, ${analysis.opaque.length} непрозорих матеріалів`, 
-            'info'
-          );
-        }
-      });
-    }
-  }
-  
-  setupModelSelector(callback) {
+  setupModelSelector(callback, fileCallback) {
     this.modelSelectorCallback = callback;
+    this.fileUploadCallback = fileCallback;
     
     const modelCards = document.querySelectorAll('.model-card');
     modelCards.forEach(card => {
@@ -123,10 +96,131 @@ export class UIManager {
         modelCards.forEach(c => c.classList.remove('active'));
         card.classList.add('active');
         
+        // Приховуємо інформацію про файл
+        this.clearFileInfo();
+        
         this.currentModel = modelPath;
         callback(modelPath);
       });
     });
+    
+    // Обробка завантаження файлів
+    this.setupFileUpload();
+  }
+  
+  setupFileUpload() {
+    const fileInput = document.getElementById('file-input');
+    const uploadButton = document.getElementById('upload-button');
+    const clearButton = document.getElementById('clear-file');
+    
+    if (uploadButton && fileInput) {
+      uploadButton.addEventListener('click', () => {
+        fileInput.click();
+      });
+      
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          this.handleFileUpload(file);
+        }
+      });
+    }
+    
+    if (clearButton) {
+      clearButton.addEventListener('click', () => {
+        this.clearFileInfo();
+        if (fileInput) fileInput.value = '';
+      });
+    }
+  }
+  
+  handleFileUpload(file) {
+    // Показуємо інформацію про файл
+    const fileInfo = document.getElementById('file-info');
+    const fileName = document.getElementById('file-name');
+    
+    if (fileInfo && fileName) {
+      fileName.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+      fileInfo.classList.remove('hidden');
+    }
+    
+    // Прибираємо активні карточки
+    const modelCards = document.querySelectorAll('.model-card');
+    modelCards.forEach(c => c.classList.remove('active'));
+    
+    // Викликаємо callback для завантаження
+    if (this.fileUploadCallback) {
+      this.fileUploadCallback(file);
+    }
+  }
+  
+  clearFileInfo() {
+    const fileInfo = document.getElementById('file-info');
+    if (fileInfo) {
+      fileInfo.classList.add('hidden');
+    }
+  }
+  
+  setupGlowSettings(callback) {
+    this.glowSettingsCallback = callback;
+    
+    const applyButton = document.getElementById('apply-glow-settings');
+    if (applyButton) {
+      applyButton.addEventListener('click', () => {
+        const settings = {
+          eyes: document.getElementById('glow-eyes')?.checked || false,
+          lights: document.getElementById('glow-lights')?.checked || false,
+          transparent: document.getElementById('glow-transparent')?.checked || false,
+          emissive: document.getElementById('glow-emissive')?.checked || false,
+          all: document.getElementById('glow-all')?.checked || false
+        };
+        
+        console.log('🎯 Налаштування свічення:', settings);
+        callback(settings);
+      });
+    }
+  }
+  
+  setupCustomLightingControls(callback) {
+    this.lightingCallback = callback;
+    
+    // Слайдери освітлення
+    this.setupSlider('main-light-intensity', 'main-light-value', (value) => {
+      callback({ mainIntensity: parseFloat(value) });
+    });
+    
+    this.setupSlider('inner-light-intensity', 'inner-light-value', (value) => {
+      callback({ innerIntensity: parseFloat(value) });
+    });
+    
+    this.setupSlider('bottom-light-intensity', 'bottom-light-value', (value) => {
+      callback({ bottomIntensity: parseFloat(value) });
+    });
+    
+    // Колір внутрішнього світла
+    const colorPicker = document.getElementById('inner-light-color');
+    if (colorPicker) {
+      colorPicker.addEventListener('input', (e) => {
+        callback({ innerColor: e.target.value });
+      });
+    }
+    
+    // Кнопка переключення освітлення
+    const toggleButton = document.getElementById('toggle-lighting');
+    if (toggleButton) {
+      let useCustomLighting = true;
+      toggleButton.addEventListener('click', () => {
+        useCustomLighting = !useCustomLighting;
+        callback({ 
+          toggleLighting: true, 
+          useCustom: useCustomLighting 
+        });
+        
+        toggleButton.textContent = useCustomLighting 
+          ? '🔄 Оригінальне/Власне світло (Власне)' 
+          : '🔄 Оригінальне/Власне світло (Оригінальне)';
+      });
+    }
   }
   
   setupSlider(sliderId, valueId, callback) {
@@ -236,12 +330,12 @@ export class UIManager {
   
   getControlValues() {
     return {
-      bloomStrength: parseFloat(document.getElementById('strength')?.value || 1.5),
+      bloomStrength: parseFloat(document.getElementById('strength')?.value || 1),
       bloomThreshold: parseFloat(document.getElementById('threshold')?.value || 0.1),
-      bloomRadius: parseFloat(document.getElementById('radius')?.value || 0.4),
-      exposure: parseFloat(document.getElementById('exposure')?.value || 1),
-      glowIntensity: parseFloat(document.getElementById('glow-intensity')?.value || 2),
-      glowHue: parseFloat(document.getElementById('glow-hue')?.value || 0.6),
+      bloomRadius: parseFloat(document.getElementById('radius')?.value || 0.55),
+      exposure: parseFloat(document.getElementById('exposure')?.value || 0.1),
+      glowIntensity: parseFloat(document.getElementById('glow-intensity')?.value || 2.9),
+      glowHue: parseFloat(document.getElementById('glow-hue')?.value || 0.06),
       bloomMode: document.querySelector('input[name=\"bloom-mode\"]:checked')?.value || 'simple',
       currentModel: this.currentModel
     };

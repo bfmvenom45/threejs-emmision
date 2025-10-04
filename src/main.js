@@ -16,7 +16,7 @@ class App {
     this.uiManager = new UIManager();
     
     this.currentModel = null;
-    this.currentModelName = 'House.glb';
+    this.currentModelName = 'House15.glb';
     
     this.init();
   }
@@ -37,6 +37,9 @@ class App {
     
     // Обробники подій
     this.setupEventListeners();
+    
+    // Drag & Drop функціональність
+    this.setupDragAndDrop();
   }
   
   async loadModel(modelPath) {
@@ -54,23 +57,63 @@ class App {
       const model = await this.modelLoader.load(modelPath);
       this.currentModel = model;
       
+      // Застосування всіх ефектів
+      this.applyAllEffects(model, modelPath);
+      
+    } catch (error) {
+      console.error('Помилка завантаження моделі:', error);
+      this.hideLoading();
+      this.uiManager.showNotification(`Помилка завантаження ${modelPath}: ${error.message}`, 'error');
+    }
+  }
+  
+  async loadModelFromFile(file) {
+    try {
+      this.showLoading();
+      this.uiManager.showNotification(`Завантаження файлу ${file.name}...`, 'info');
+      
+      // Видалення попередньої моделі
+      if (this.currentModel) {
+        this.sceneManager.scene.remove(this.currentModel);
+        this.glowManager.clearGlowMeshes();
+      }
+      
+      // Завантаження моделі з файлу
+      const model = await this.modelLoader.loadFromFile(file);
+      this.currentModel = model;
+      
+      // Застосування всіх ефектів
+      this.applyAllEffects(model, file.name);
+      
+    } catch (error) {
+      console.error('Помилка завантаження файлу:', error);
+      this.hideLoading();
+      this.uiManager.showNotification(`Помилка завантаження ${file.name}: ${error.message}`, 'error');
+    }
+  }
+  
+  applyAllEffects(model, modelName) {
+    try {
       // Додавання до сцени
       this.sceneManager.scene.add(model);
       
-      // Додавання glow ефекту
+      // Додавання власного освітлення
+      this.sceneManager.addCustomLighting(model);
+      
+      // Додавання glow ефекту з налаштуваннями за замовчуванням
       this.glowManager.addInnerGlow(model);
       
       // Оновлення bloom шарів
       this.bloomManager.setupModelLayers(model);
       
       this.hideLoading();
-      this.uiManager.showNotification(`Модель ${modelPath} успішно завантажена!`, 'success');
-      console.log(`Модель ${modelPath} успішно завантажена`);
+      this.uiManager.showNotification(`${modelName} успішно завантажено та налаштовано!`, 'success');
+      console.log(`Модель ${modelName} успішно завантажена та налаштована`);
       
     } catch (error) {
-      console.error('Помилка завантаження моделі:', error);
+      console.error('Помилка застосування ефектів:', error);
       this.hideLoading();
-      this.uiManager.showNotification(`Помилка завантаження ${modelPath}: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Помилка застосування ефектів до ${modelName}`, 'error');
     }
   }
   
@@ -83,30 +126,7 @@ class App {
     // Налаштування контролів glow
     this.uiManager.setupGlowControls((params) => {
       this.glowManager.updateParams(params);
-      
-      // Якщо змінюється прозорість, застосовуємо до поточної моделі
-      if (params.transparency && this.currentModel) {
-        this.glowManager.forceTransparency(this.currentModel, params.transparency);
-        // Перезастосовуємо glow після зміни прозорості
-        this.glowManager.addInnerGlow(this.currentModel);
-      }
     });
-    
-    // Налаштування контролів прозорості
-    this.uiManager.setupTransparencyControls(
-      (transparency) => {
-        if (this.currentModel) {
-          this.glowManager.forceTransparency(this.currentModel, transparency);
-          this.glowManager.addInnerGlow(this.currentModel);
-        }
-      },
-      () => {
-        if (this.currentModel) {
-          return this.glowManager.analyzeModelTransparency(this.currentModel);
-        }
-        return null;
-      }
-    );
     
     // Налаштування пульсації
     this.uiManager.setupPulseControl((enabled) => {
@@ -128,9 +148,29 @@ class App {
     });
     
     // Налаштування вибору моделі
-    this.uiManager.setupModelSelector((modelPath) => {
-      this.currentModelName = modelPath;
-      this.loadModel(modelPath);
+    this.uiManager.setupModelSelector(
+      (modelPath) => {
+        this.currentModelName = modelPath;
+        this.loadModel(modelPath);
+      },
+      (file) => {
+        this.loadModelFromFile(file);
+      }
+    );
+    
+    // Налаштування свічення об'єктів
+    this.uiManager.setupGlowSettings((settings) => {
+      this.glowManager.updateGlowSettings(settings);
+      // Перезастосовуємо glow з новими налаштуваннями
+      if (this.currentModel) {
+        this.glowManager.addInnerGlow(this.currentModel);
+        this.uiManager.showNotification('Налаштування світіння оновлено!', 'success');
+      }
+    });
+    
+    // Налаштування власного освітлення
+    this.uiManager.setupCustomLightingControls((params) => {
+      this.sceneManager.updateCustomLighting(params);
     });
   }
   
@@ -139,6 +179,64 @@ class App {
     window.addEventListener('resize', () => {
       this.sceneManager.onWindowResize();
       this.bloomManager.onWindowResize();
+    });
+  }
+  
+  setupDragAndDrop() {
+    const canvas = this.canvas;
+    
+    // Запобігаємо стандартній поведінці браузера
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      canvas.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+    
+    // Візуальні ефекти при перетягуванні
+    ['dragenter', 'dragover'].forEach(eventName => {
+      canvas.addEventListener(eventName, () => {
+        canvas.style.filter = 'brightness(1.2) saturate(1.3)';
+        canvas.style.border = '3px dashed #4f9eff';
+      });
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+      canvas.addEventListener(eventName, () => {
+        canvas.style.filter = '';
+        canvas.style.border = '';
+      });
+    });
+    
+    // Обробка drop події
+    canvas.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      
+      if (files.length > 0) {
+        const file = files[0];
+        
+        // Перевірка типу файлу
+        if (file.name.toLowerCase().endsWith('.glb') || file.name.toLowerCase().endsWith('.gltf')) {
+          this.uiManager.handleFileUpload(file);
+        } else {
+          this.uiManager.showNotification('Підтримуються тільки .glb та .gltf файли', 'error');
+        }
+      }
+    });
+    
+    console.log('🎯 Drag & Drop налаштовано для GLB/GLTF файлів');
+    
+    // 🔧 Секретні гарячі клавіші для налаштувань (Ctrl/Cmd + Shift + S)
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        const controlsPanel = document.querySelector('.controls-panel');
+        if (controlsPanel) {
+          const isHidden = controlsPanel.style.display === 'none';
+          controlsPanel.style.display = isHidden ? 'block' : 'none';
+          console.log(isHidden ? '🔧 Панель налаштувань відкрита' : '🔒 Панель налаштувань прихована');
+        }
+      }
     });
   }
   
