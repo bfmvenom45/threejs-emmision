@@ -263,9 +263,12 @@ export class ModelLoader {
     model.position.y = -center.y;
     model.position.z = -center.z;
     
+    // піднімаємо на 10% висоти моделі
+    model.position.y += size.y * 0.2;
+    
     // Масштабування для стандартного розміру
     const maxDimension = Math.max(size.x, size.y, size.z);
-    const targetSize = 3; // Цільовий розмір
+    const targetSize = 5; // Цільовий розмір
     
     if (maxDimension > 0) {
       const scale = targetSize / maxDimension;
